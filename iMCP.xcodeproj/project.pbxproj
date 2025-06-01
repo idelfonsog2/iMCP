@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6CF7C6E22DECDAE300343FC5 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 6CF7C6E12DECDAE300343FC5 /* ComposableArchitecture */; };
 		F809556E2D7888920055B911 /* TypedStream in Frameworks */ = {isa = PBXBuildFile; productRef = F809556D2D7888920055B911 /* TypedStream */; };
 		F80955702D7888920055B911 /* iMessage in Frameworks */ = {isa = PBXBuildFile; productRef = F809556F2D7888920055B911 /* iMessage */; };
 		F825BDBF2D9AD00E0063ADD7 /* ServiceLifecycle in Frameworks */ = {isa = PBXBuildFile; productRef = F825BDBE2D9AD00E0063ADD7 /* ServiceLifecycle */; };
@@ -88,6 +89,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6CF7C6E22DECDAE300343FC5 /* ComposableArchitecture in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,12 +123,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		6CF7C6E02DECDAE300343FC5 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		F8F44E642D59038D0075D79C = {
 			isa = PBXGroup;
 			children = (
 				F8F44E6F2D59038D0075D79C /* App */,
 				F8F44EB72D5908D00075D79C /* CLI */,
 				6CF7C6A92DECA2AB00343FC5 /* Deets */,
+				6CF7C6E02DECDAE300343FC5 /* Frameworks */,
 				F8F44E6E2D59038D0075D79C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -161,6 +171,7 @@
 			);
 			name = Deets;
 			packageProductDependencies = (
+				6CF7C6E12DECDAE300343FC5 /* ComposableArchitecture */,
 			);
 			productName = Deets;
 			productReference = 6CF7C6A82DECA2AB00343FC5 /* Deets.app */;
@@ -760,6 +771,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		6CF7C6E12DECDAE300343FC5 /* ComposableArchitecture */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6CF7C6D22DECA48D00343FC5 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
+			productName = ComposableArchitecture;
+		};
 		F809556D2D7888920055B911 /* TypedStream */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F809556C2D7888920055B911 /* XCRemoteSwiftPackageReference "madrid" */;

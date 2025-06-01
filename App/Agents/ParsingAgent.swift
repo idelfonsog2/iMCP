@@ -1,3 +1,13 @@
+import Foundation
+import MCP
+import MapKit
+import EventKit
+import CoreLocation
+import OSLog
+import Ontology
+
+private let log = Logger.service("travel-planning")
+
 actor ParsingAgent {
     func parseInput(_ input: String, context: [String: Value]?) async throws -> ParsedActivity? {
         let lowercaseInput = input.lowercased()

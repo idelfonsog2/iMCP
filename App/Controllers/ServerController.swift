@@ -54,7 +54,7 @@ enum ServiceRegistry {
         MapsService.shared,
         MessageService.shared,
         RemindersService.shared,
-        UtilitiesService.shared,
+        UtilitiesService.shared,    
         WeatherService.shared,
         TravelPlanningService.shared,
     ]

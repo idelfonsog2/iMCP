@@ -82,8 +82,8 @@ final class TravelPlanningService: Service {
                         )
                     ),
                     "transportMode": .string(
-                        enum: ["walking", "driving", "transit"],
-                        default: "walking"
+                        default: "walking",
+                        enum: ["walking", "driving", "transit"]
                     )
                 ],
                 required: ["activities"]
@@ -119,8 +119,7 @@ final class TravelPlanningService: Service {
                         required: ["startTime", "endTime"]
                     ),
                     "preferences": .array(
-                        items: .string(),
-                        default: []
+                        default: [], items: .string()
                     )
                 ]
             ),
@@ -151,8 +150,7 @@ final class TravelPlanningService: Service {
                                     ]
                                 ),
                                 "flexibility": .string(
-                                    enum: ["fixed", "flexible", "very_flexible"],
-                                    default: "flexible"
+                                    default: "flexible", enum: ["fixed", "flexible", "very_flexible"]
                                 ),
                                 "duration": .number()
                             ]
@@ -311,9 +309,8 @@ extension TravelPlanningService {
         let activities = try parseActivities(activitiesData)
         let transportMode = arguments["transportMode"]?.stringValue ?? "walking"
         
-        let startLocation = arguments["startLocation"]?.objectValue.flatMap { locationData in
-            guard let lat = locationData["latitude"]?.doubleValue,
-                  let lng = locationData["longitude"]?.doubleValue else { return nil }
+        let startLocation = arguments["startLocation"]?.objectValue.flatMap { (locationData: [String: Value]) -> CLLocationCoordinate2D? in
+            guard let lat = locationData["latitude"]?.doubleValue, let lng = locationData["longitude"]?.doubleValue else { return nil }
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
         
@@ -323,18 +320,18 @@ extension TravelPlanningService {
             transportMode: transportMode
         )
         
-        return .object([
-            "optimizedOrder": .array(optimization.optimizedOrder.map { .string($0) }),
-            "totalTimeSaved": .double(optimization.timeSavings),
-            "totalDistance": .double(optimization.totalDistance),
-            "recommendations": .array(optimization.recommendations.map { .string($0) }),
-            "routeSegments": .array(optimization.routeSegments.map { segment in
-                .object([
-                    "from": .string(segment.from),
-                    "to": .string(segment.to),
-                    "duration": .double(segment.duration),
-                    "distance": .double(segment.distance),
-                    "mode": .string(segment.transportMode)
+        return Value.object([
+            "optimizedOrder": Value.array(optimization.optimizedOrder.map { Value.string($0) }),
+            "totalTimeSaved": Value.double(optimization.timeSavings),
+            "totalDistance": Value.double(optimization.totalDistance),
+            "recommendations": Value.array(optimization.recommendations.map { Value.string($0) }),
+            "routeSegments": Value.array(optimization.routeSegments.map { segment in
+                Value.object([
+                    "from": Value.string(segment.from),
+                    "to": Value.string(segment.to),
+                    "duration": Value.double(segment.duration),
+                    "distance": Value.double(segment.distance),
+                    "mode": Value.string(segment.transportMode)
                 ])
             })
         ])
@@ -560,27 +557,11 @@ struct ChangeResult {
     let conflicts: [SyncConflict]
 }
 
-enum TravelPlanningError: Error {
+enum TravelPlanningError: Swift.Error {
     case invalidInput
     case invalidActivities
     case sessionNotFound
     case parsingFailed
-}
-
-// MARK: - Add to App/Controllers/ServerController.swift
-
-extension ServiceRegistry {
-    static let servicesWithTravel: [any Service] = [
-        CalendarService.shared,
-        ContactsService.shared,
-        LocationService.shared,
-        MapsService.shared,
-        MessageService.shared,
-        RemindersService.shared,
-        UtilitiesService.shared,
-        WeatherService.shared,
-        TravelPlanningService.shared  // Add this line
-    ]
 }
 
 // MARK: - Update ServerController.swift

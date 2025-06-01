@@ -1,3 +1,13 @@
+import Foundation
+import MCP
+import MapKit
+import EventKit
+import CoreLocation
+import OSLog
+import Ontology
+
+private let log = Logger.service("travel-planning")
+
 actor ContextAgent {
     private let weatherService = WeatherService.shared
     private let mapsService = MapsService.shared
