@@ -56,6 +56,7 @@ enum ServiceRegistry {
         RemindersService.shared,
         UtilitiesService.shared,
         WeatherService.shared,
+        TravelPlanningService.shared,
     ]
 
     static func configureServices(
