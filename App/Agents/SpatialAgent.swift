@@ -1,3 +1,13 @@
+import Foundation
+import MCP
+import MapKit
+import EventKit
+import CoreLocation
+import OSLog
+import Ontology
+
+private let log = Logger.service("travel-planning")
+
 actor SpatialAgent {
     private let mapsService = MapsService.shared
     private var routeCache: [String: RouteResult] = [:]
@@ -5,7 +15,9 @@ actor SpatialAgent {
     func detectRoutingConflicts(_ activities: [TripActivity], transportMode: String) async throws -> [TravelConflict] {
         var conflicts: [TravelConflict] = []
         
-        for i in 0..<(activities.count - 1) {
+        guard activities.count > 1 else { return conflicts }
+        
+        for i in 0..<activities.count - 1 {
             let current = activities[i]
             let next = activities[i + 1]
             
@@ -15,7 +27,6 @@ actor SpatialAgent {
             if let cached = routeCache[routeKey] {
                 travelTime = cached.duration
             } else {
-                // Use existing MapsService to get travel time
                 let result = try await mapsService.call(tool: "maps_eta", with: [
                     "originLatitude": .double(current.coordinate.latitude),
                     "originLongitude": .double(current.coordinate.longitude),

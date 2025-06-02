@@ -1,5 +1,3 @@
-// MARK: - Add to App/Services/TravelPlanning.swift (New file)
-
 import Foundation
 import MCP
 import MapKit
@@ -10,10 +8,8 @@ import Ontology
 
 private let log = Logger.service("travel-planning")
 
-// MARK: - Multi-Agent Travel Planning Service
-
 final class TravelPlanningService: Service {
-    static let shared = TravelPlanningService()
+    static let shared: TravelPlanningService = TravelPlanningService()
     
     // Swift Actor-based agents
     private let spatialAgent = SpatialAgent()
@@ -282,19 +278,19 @@ extension TravelPlanningService {
             preferences: preferences
         )
         
-        return .object([
-            "suggestions": .array(suggestions.map { suggestion in
-                .object([
-                    "name": .string(suggestion.name),
-                    "category": .string(suggestion.category),
-                    "location": .object([
-                        "latitude": .double(suggestion.coordinate.latitude),
-                        "longitude": .double(suggestion.coordinate.longitude),
-                        "name": .string(suggestion.locationName)
+        return Value.object([
+            "suggestions": Value.array(suggestions.map { suggestion in
+                Value.object([
+                    "name": Value.string(suggestion.name),
+                    "category": Value.string(suggestion.category),
+                    "location": Value.object([
+                        "latitude": Value.double(suggestion.coordinate.latitude),
+                        "longitude": Value.double(suggestion.coordinate.longitude),
+                        "name": Value.string(suggestion.locationName)
                     ]),
-                    "estimatedDuration": .double(suggestion.estimatedDuration),
-                    "confidence": .double(suggestion.confidence),
-                    "reason": .string(suggestion.reason)
+                    "estimatedDuration": Value.double(suggestion.estimatedDuration),
+                    "confidence": Value.double(suggestion.confidence),
+                    "reason": Value.string(suggestion.reason)
                 ])
             }),
             "contextualFactors": .array(suggestions.compactMap { $0.contextualFactor }.map { .string($0) })
@@ -443,9 +439,6 @@ extension TravelPlanningService {
     }
 }
 
-
-
-
 // MARK: - Data Models
 
 struct TripActivity {
@@ -564,14 +557,6 @@ enum TravelPlanningError: Swift.Error {
     case parsingFailed
 }
 
-// MARK: - Update ServerController.swift
-
-// In ServerController.swift, replace:
-// static let services: [any Service] = [...]
-// with:
-// static let services: [any Service] = ServiceRegistry.servicesWithTravel
-
-// MARK: - Usage Examples for Claude Desktop
 
 /*
 Now Claude Desktop can use these tools:

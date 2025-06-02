@@ -66,7 +66,7 @@ actor CollaborationAgent {
         }
         
         // Apply the change
-        session.pendingChanges.append(change)
+        activeSessions[session.tripId]?.pendingChanges.append(change)
         return ChangeResult(success: true, conflicts: [])
     }
     

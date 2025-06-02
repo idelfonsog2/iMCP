@@ -1,15 +1,23 @@
+import Foundation
+import MCP
+import MapKit
+import EventKit
+import CoreLocation
+import OSLog
+import Ontology
+
+private let log = Logger.service("travel-planning")
+
 actor TemporalAgent {
     private let calendarService = CalendarService.shared
     
     func detectSchedulingConflicts(_ activities: [TripActivity]) async throws -> [TravelConflict] {
         var conflicts: [TravelConflict] = []
         
-        // Check for overlapping activities
-        for i in 0..<activities.count {
-            for j in (i+1)..<activities.count {
-                let activity1 = activities[i]
-                let activity2 = activities[j]
-                
+        guard activities.count > 1 else { return conflicts }
+        // Check for overlapping activities using efficient pairwise comparison
+        for (i, activity1) in activities.enumerated() {
+            for activity2 in activities.dropFirst(i + 1) {
                 if activitiesOverlap(activity1, activity2) {
                     conflicts.append(TravelConflict(
                         type: .scheduleOverlap,
@@ -28,8 +36,8 @@ actor TemporalAgent {
         
         // Check against existing calendar events
         if await calendarService.isActivated {
-            let conflicts = try await checkCalendarConflicts(activities)
-            conflicts.append(contentsOf: conflicts)
+            let detectedConflicts = try await checkCalendarConflicts(activities)
+            conflicts.append(contentsOf: detectedConflicts)
         }
         
         return conflicts

@@ -54,8 +54,7 @@ enum ServiceRegistry {
         MapsService.shared,
         MessageService.shared,
         RemindersService.shared,
-        UtilitiesService.shared,    
-        WeatherService.shared,
+        UtilitiesService.shared,
         TravelPlanningService.shared,
     ]
 
@@ -67,7 +66,7 @@ enum ServiceRegistry {
         messagesEnabled: Binding<Bool>,
         remindersEnabled: Binding<Bool>,
         utilitiesEnabled: Binding<Bool>,
-        weatherEnabled: Binding<Bool>
+        travelEnabled: Binding<Bool>
     ) -> [ServiceConfig] {
         [
             ServiceConfig(
@@ -113,11 +112,11 @@ enum ServiceRegistry {
                 binding: remindersEnabled
             ),
             ServiceConfig(
-                name: "Weather",
+                name: "Travel Planning",
                 iconName: "cloud.sun.fill",
                 color: .cyan,
-                service: WeatherService.shared,
-                binding: weatherEnabled
+                service: TravelPlanningService.shared,
+                binding: travelEnabled
             ),
         ]
     }
@@ -141,7 +140,7 @@ final class ServerController: ObservableObject {
     @AppStorage("messagesEnabled") private var messagesEnabled = false
     @AppStorage("remindersEnabled") private var remindersEnabled = false
     @AppStorage("utilitiesEnabled") private var utilitiesEnabled = true  // Default for utilities
-    @AppStorage("weatherEnabled") private var weatherEnabled = false
+    @AppStorage("travelEnabled") private var travelEnabled = false
 
     // MARK: - Computed Properties for Service Configurations and Bindings
     var computedServiceConfigs: [ServiceConfig] {
@@ -153,7 +152,7 @@ final class ServerController: ObservableObject {
             messagesEnabled: $messagesEnabled,
             remindersEnabled: $remindersEnabled,
             utilitiesEnabled: $utilitiesEnabled,
-            weatherEnabled: $weatherEnabled
+            travelEnabled: $travelEnabled
         )
     }
 

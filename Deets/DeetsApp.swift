@@ -68,6 +68,12 @@ struct AppFeature: Reducer {
     }
     
     var body: some ReducerOf<Self> {
+        Scope(state: \.tripsList, action: \.tripsList) {
+            TripsListFeature()
+        }
+        Scope(state: \.importFlow, action: \.importFlow) {
+            ImportFeature()
+        }
         Reduce { state, action in
             switch action {
             case let .tabSelected(tab):
@@ -89,12 +95,6 @@ struct AppFeature: Reducer {
         }
         .ifLet(\.currentTrip, action: \.trip) {
             TripFeature()
-        }
-        .ifLet(\.tripsList, action: \.tripsList) {
-            TripsListFeature()
-        }
-        .ifLet(\.importFlow, action: \.importFlow) {
-            ImportFeature()
         }
     }
 }
@@ -168,6 +168,22 @@ struct TripFeature {
         
         enum ViewMode {
             case unified, mapFocused, timelineFocused, listFocused
+        }
+        
+        // TripFeature.State does not conforms to Equatable becasue
+        // MKCoordinateRegion doesn't conform to Equatable protocol,
+        // but it's a property in your TripFeature.State which needs to be Equatable for TCA.
+        static func == (lhs: TripFeature.State, rhs: TripFeature.State) -> Bool {
+            return lhs.trip == rhs.trip &&
+                   lhs.selectedActivity == rhs.selectedActivity &&
+                   lhs.quickInput == rhs.quickInput &&
+                   lhs.isProcessingInput == rhs.isProcessingInput &&
+                   lhs.mapRegion.center.latitude == rhs.mapRegion.center.latitude &&
+                   lhs.mapRegion.center.longitude == rhs.mapRegion.center.longitude &&
+                   lhs.mapRegion.span.latitudeDelta == rhs.mapRegion.span.latitudeDelta &&
+                   lhs.mapRegion.span.longitudeDelta == rhs.mapRegion.span.longitudeDelta &&
+                   lhs.conflicts == rhs.conflicts &&
+                   lhs.viewMode == rhs.viewMode
         }
         
         init(trip: TravelTrip) {
