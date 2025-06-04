@@ -100,7 +100,6 @@ struct AppFeature: Reducer {
 }
 
 // MARK: - App View
-
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
     
@@ -143,9 +142,7 @@ struct AppView: View {
             )
             
         case .importDoc:
-            ImportView(
-                store: store.scope(state: \.importFlow, action: \.importFlow)
-            )
+            ImportView(store: store.scope(state: \.importFlow, action: \.importFlow))
         }
     }
 }
