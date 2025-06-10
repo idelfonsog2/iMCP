@@ -33,38 +33,19 @@ struct AppFeature: Reducer {
         var currentTrip: TripFeature.State?
         var tripsList: TripsListFeature.State = TripsListFeature.State()
         var importFlow: ImportFeature.State = ImportFeature.State()
-        var selectedTab: Tab = .timeline
-        
-        enum Tab: CaseIterable {
-            case map, timeline, list, importDoc
-            
-            var title: String {
-                switch self {
-                case .map: return "Map"
-                case .timeline: return "Timeline"
-                case .list: return "Plans"
-                case .importDoc: return "Import"
-                }
-            }
-            
-            var icon: String {
-                switch self {
-                case .map: return "map.fill"
-                case .timeline: return "calendar"
-                case .list: return "list.bullet"
-                case .importDoc: return "square.and.arrow.down"
-                }
-            }
-        }
+        var showingImportSheet: Bool = false
+        var expandedTrip: TravelTrip?
     }
     
     enum Action {
-        case tabSelected(State.Tab)
         case trip(TripFeature.Action)
         case tripsList(TripsListFeature.Action)
         case importFlow(ImportFeature.Action)
         case loadSampleTrip
         case selectTrip(TravelTrip)
+        case expandTrip(TravelTrip?)
+        case showImportSheet(Bool)
+        case dismissImportSheet
     }
     
     var body: some ReducerOf<Self> {
@@ -76,10 +57,6 @@ struct AppFeature: Reducer {
         }
         Reduce { state, action in
             switch action {
-            case let .tabSelected(tab):
-                state.selectedTab = tab
-                return .none
-                
             case .loadSampleTrip:
                 let sampleTrip = TravelTrip.sampleParis
                 state.currentTrip = TripFeature.State(trip: sampleTrip)
@@ -87,6 +64,21 @@ struct AppFeature: Reducer {
                 
             case let .selectTrip(trip):
                 state.currentTrip = TripFeature.State(trip: trip)
+                return .none
+                
+            case let .expandTrip(trip):
+                state.expandedTrip = trip
+                if let trip = trip {
+                    state.currentTrip = TripFeature.State(trip: trip)
+                }
+                return .none
+                
+            case let .showImportSheet(show):
+                state.showingImportSheet = show
+                return .none
+                
+            case .dismissImportSheet:
+                state.showingImportSheet = false
                 return .none
                 
             case .trip, .tripsList, .importFlow:
@@ -100,50 +92,264 @@ struct AppFeature: Reducer {
 }
 
 // MARK: - App View
+
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
     
     var body: some View {
-        TabView(selection: $store.selectedTab.sending(\.tabSelected)) {
-            ForEach(AppFeature.State.Tab.allCases, id: \.self) { tab in
-                tabContent(for: tab)
-                    .tabItem {
-                        Image(systemName: tab.icon)
-                        Text(tab.title)
+        NavigationView {
+            ZStack {
+                // Main Plans List
+                TripsListView(
+                    store: store.scope(state: \.tripsList, action: \.tripsList),
+                    onTripSelected: { trip in
+                        store.send(.expandTrip(trip))
                     }
-                    .tag(tab)
+                )
+                .opacity(store.expandedTrip == nil ? 1 : 0)
+                .animation(.easeInOut(duration: 0.3), value: store.expandedTrip == nil)
+                
+                // Expanded Trip View
+                if let tripStore = store.scope(state: \.currentTrip, action: \.trip),
+                   store.expandedTrip != nil {
+                    ExpandedTripView(
+                        store: tripStore,
+                        onDismiss: {
+                            store.send(.expandTrip(nil))
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.expandedTrip != nil)
+                }
+            }
+            .navigationTitle("Plans")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        store.send(.showImportSheet(true))
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.title2)
+                    }
+                }
+            }
+            .sheet(isPresented: $store.showingImportSheet.sending(\.showImportSheet)) {
+                ImportView(
+                    store: store.scope(state: \.importFlow, action: \.importFlow),
+                    onDismiss: {
+                        store.send(.dismissImportSheet)
+                    }
+                )
             }
         }
         .onAppear {
             store.send(.loadSampleTrip)
         }
     }
+}
+
+// MARK: - Expanded Trip View
+
+struct ExpandedTripView: View {
+    @Bindable var store: StoreOf<TripFeature>
+    let onDismiss: () -> Void
     
-    @ViewBuilder
-    private func tabContent(for tab: AppFeature.State.Tab) -> some View {
-        switch tab {
-        case .map:
-            if let tripStore = store.scope(state: \.currentTrip, action: \.trip) {
-                UnifiedTripView(store: tripStore, mode: .mapFocused)
-            } else {
-                EmptyTripView()
-            }
-            
-        case .timeline:
-            if let tripStore = store.scope(state: \.currentTrip, action: \.trip) {
-                UnifiedTripView(store: tripStore, mode: .timelineFocused)
-            } else {
-                EmptyTripView()
-            }
-            
-        case .list:
-            TripsListView(
-                store: store.scope(state: \.tripsList, action: \.tripsList)
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header with dismiss and view mode toggle
+            ExpandedTripHeader(
+                tripName: store.trip.name,
+                viewMode: store.viewMode,
+                onDismiss: onDismiss,
+                onViewModeChanged: { mode in
+                    store.send(.viewModeChanged(mode))
+                }
             )
             
-        case .importDoc:
-            ImportView(store: store.scope(state: \.importFlow, action: \.importFlow))
+            // Quick Add Bar
+            QuickAddBarView(store: store)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            
+            Divider()
+            
+            // Main Content based on view mode
+            switch store.viewMode {
+            case .unified:
+                UnifiedContentView(store: store)
+            case .mapFocused:
+                MapFocusedView(store: store)
+            case .timelineFocused:
+                TimelineFocusedView(store: store)
+            case .listFocused:
+                ListFocusedView(store: store)
+            }
         }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(radius: 20)
+        .padding()
+        
+        // Conflicts overlay
+        if !store.conflicts.isEmpty {
+            ConflictsOverlay(conflicts: store.conflicts)
+        }
+    }
+}
+
+// MARK: - Expanded Trip Header
+
+struct ExpandedTripHeader: View {
+    let tripName: String
+    let viewMode: TripFeature.State.ViewMode
+    let onDismiss: () -> Void
+    let onViewModeChanged: (TripFeature.State.ViewMode) -> Void
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Top row: dismiss button and title
+            HStack {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Text(tripName)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Menu {
+                    Button("Detect Conflicts") {
+                        // Handle conflicts detection
+                    }
+                    Button("Optimize Route") {
+                        // Handle route optimization
+                    }
+                    Divider()
+                    Button("Share Trip") {
+                        // Handle sharing
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // View mode toggle
+            ViewModeToggle(
+                selectedMode: viewMode,
+                onModeChanged: onViewModeChanged
+            )
+        }
+        .padding()
+    }
+}
+
+// MARK: - View Mode Toggle
+
+struct ViewModeToggle: View {
+    let selectedMode: TripFeature.State.ViewMode
+    let onModeChanged: (TripFeature.State.ViewMode) -> Void
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach([TripFeature.State.ViewMode.unified, .mapFocused, .timelineFocused, .listFocused], id: \.self) { mode in
+                Button {
+                    onModeChanged(mode)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: mode.iconName)
+                            .font(.system(size: 16, weight: .medium))
+                        Text(mode.shortTitle)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(selectedMode == mode ? .white : .secondary)
+                    .frame(width: 60, height: 50)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selectedMode == mode ? Color.blue : Color.clear)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemGray6))
+        )
+    }
+}
+
+// MARK: - Content Views
+
+struct UnifiedContentView: View {
+    @Bindable var store: StoreOf<TripFeature>
+    
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // Top Half: Map
+                TripMapView(store: store)
+                    .frame(height: geometry.size.height * 0.5)
+                
+                Divider()
+                
+                // Bottom Half: Split Timeline + List
+                HStack(spacing: 0) {
+                    TimelineView(store: store)
+                        .frame(width: geometry.size.width * 0.6)
+                    
+                    Divider()
+                    
+                    ActivitiesListView(store: store)
+                        .frame(width: geometry.size.width * 0.4)
+                }
+                .frame(height: geometry.size.height * 0.5)
+            }
+        }
+    }
+}
+
+struct MapFocusedView: View {
+    @Bindable var store: StoreOf<TripFeature>
+    
+    var body: some View {
+        TripMapView(store: store)
+            .overlay(alignment: .bottom) {
+                if let selectedActivity = store.selectedActivity {
+                    ActivityDetailCard(
+                        activity: selectedActivity,
+                        onDismiss: { store.send(.activitySelected(nil)) }
+                    )
+                    .padding()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+    }
+}
+
+struct TimelineFocusedView: View {
+    let store: StoreOf<TripFeature>
+    
+    var body: some View {
+        TimelineView(store: store)
+    }
+}
+
+struct ListFocusedView: View {
+    let store: StoreOf<TripFeature>
+    
+    var body: some View {
+        ActivitiesListView(store: store)
     }
 }
 
@@ -163,13 +369,29 @@ struct TripFeature {
         var conflicts: [TravelConflict] = []
         var viewMode: ViewMode = .unified
         
-        enum ViewMode {
+        enum ViewMode: CaseIterable {
             case unified, mapFocused, timelineFocused, listFocused
+            
+            var iconName: String {
+                switch self {
+                case .unified: return "rectangle.split.2x2"
+                case .mapFocused: return "map"
+                case .timelineFocused: return "calendar"
+                case .listFocused: return "list.bullet"
+                }
+            }
+            
+            var shortTitle: String {
+                switch self {
+                case .unified: return "All"
+                case .mapFocused: return "Map"
+                case .timelineFocused: return "Time"
+                case .listFocused: return "List"
+                }
+            }
         }
         
-        // TripFeature.State does not conforms to Equatable becasue
-        // MKCoordinateRegion doesn't conform to Equatable protocol,
-        // but it's a property in your TripFeature.State which needs to be Equatable for TCA.
+        // Custom Equatable implementation for MKCoordinateRegion
         static func == (lhs: TripFeature.State, rhs: TripFeature.State) -> Bool {
             return lhs.trip == rhs.trip &&
                    lhs.selectedActivity == rhs.selectedActivity &&
@@ -326,127 +548,6 @@ struct TripFeature {
     }
 }
 
-// MARK: - Unified Trip View
-
-struct UnifiedTripView: View {
-    @Bindable var store: StoreOf<TripFeature>
-    let mode: TripFeature.State.ViewMode
-    
-    var body: some View {
-        NavigationView {
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    // Quick Add Bar
-                    QuickAddBarView(store: store)
-                        .padding()
-                        .background(Color(.systemBackground))
-                    
-                    Divider()
-                    
-                    // Main Content based on mode
-                    switch mode {
-                    case .unified:
-                        unifiedContent(geometry: geometry)
-                    case .mapFocused:
-                        mapFocusedContent()
-                    case .timelineFocused:
-                        timelineFocusedContent()
-                    case .listFocused:
-                        listFocusedContent()
-                    }
-                }
-            }
-            .navigationTitle(store.trip.name)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button("Detect Conflicts") {
-                            store.send(.detectConflicts)
-                        }
-                        Button("Optimize Route") {
-                            store.send(.optimizeRoute)
-                        }
-                        Divider()
-                        Button("Share Trip") {
-                            // TODO: Implement sharing
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private func unifiedContent(geometry: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            // Top Half: Map
-            TripMapView(store: store)
-                .frame(height: geometry.size.height * 0.5)
-            
-            Divider()
-            
-            // Bottom Half: Split Timeline + List
-            HStack(spacing: 0) {
-                TimelineView(store: store)
-                    .frame(width: geometry.size.width * 0.6)
-                
-                Divider()
-                
-                ActivitiesListView(store: store)
-                    .frame(width: geometry.size.width * 0.4)
-            }
-            .frame(height: geometry.size.height * 0.5)
-        }
-        
-        // Conflicts Alert Overlay
-        if !store.conflicts.isEmpty {
-            conflictsOverlay(conflicts: store.conflicts)
-        }
-    }
-    
-    @ViewBuilder
-    private func mapFocusedContent() -> some View {
-        TripMapView(store: store)
-            .overlay(alignment: .bottom) {
-                if let selectedActivity = store.selectedActivity {
-                    ActivityDetailCard(
-                        activity: selectedActivity,
-                        onDismiss: { store.send(.activitySelected(nil)) }
-                    )
-                    .padding()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-    }
-    
-    @ViewBuilder
-    private func timelineFocusedContent() -> some View {
-        TimelineView(store: store)
-    }
-    
-    @ViewBuilder
-    private func listFocusedContent() -> some View {
-        ActivitiesListView(store: store)
-    }
-    
-    @ViewBuilder
-    private func conflictsOverlay(conflicts: [TravelConflict]) -> some View {
-        VStack {
-            Spacer()
-            
-            ConflictsAlertView(conflicts: conflicts) {
-                // Dismiss conflicts - could clear the conflicts array
-            }
-            .padding()
-        }
-        .background(Color.black.opacity(0.3))
-        .transition(.opacity)
-    }
-}
-
 // MARK: - Quick Add Bar
 
 struct QuickAddBarView: View {
@@ -558,6 +659,25 @@ struct ActivitiesListView: View {
             }
             .background(Color(.systemBackground))
         }
+    }
+}
+
+// MARK: - Conflicts Overlay
+
+struct ConflictsOverlay: View {
+    let conflicts: [TravelConflict]
+    
+    var body: some View {
+        VStack {
+            Spacer()
+            
+            ConflictsAlertView(conflicts: conflicts) {
+                // Dismiss conflicts
+            }
+            .padding()
+        }
+        .background(Color.black.opacity(0.3))
+        .transition(.opacity)
     }
 }
 
@@ -916,7 +1036,11 @@ struct TripsListFeature {
                 state.isLoading = true
                 return .run { send in
                     // Load saved trips from UserDefaults or CloudKit
-                    let trips = [TravelTrip.sampleParis] // Mock data
+                    let trips = [
+                        TravelTrip.sampleParis,
+                        TravelTrip.sampleTokyo,
+                        TravelTrip.sampleNapa
+                    ]
                     await send(.tripsLoaded(trips))
                 }
                 
@@ -940,71 +1064,109 @@ struct TripsListFeature {
 
 struct TripsListView: View {
     let store: StoreOf<TripsListFeature>
+    let onTripSelected: (TravelTrip) -> Void
     
     var body: some View {
         WithPerceptionTracking {
-            NavigationView {
-                List {
+            ScrollView {
+                LazyVStack(spacing: 16) {
                     ForEach(store.trips) { trip in
-                        TripRowView(trip: trip) {
-                            store.send(.selectTrip(trip))
-                        }
-                    }
-                    .onDelete { offsets in
-                        store.send(.deleteTripAtOffsets(offsets))
+                        TripCard(
+                            trip: trip,
+                            onTap: {
+                                onTripSelected(trip)
+                            }
+                        )
                     }
                 }
-                .navigationTitle("Travel Plans")
-                .onAppear {
-                    store.send(.onAppear)
-                }
+                .padding()
+            }
+            .onAppear {
+                store.send(.onAppear)
             }
         }
     }
 }
 
-struct TripRowView: View {
+struct TripCard: View {
     let trip: TravelTrip
     let onTap: () -> Void
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header
                 HStack {
                     Text(trip.name)
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     
                     Spacer()
                     
-                    Text("\(trip.activities.count) activities")
+                    Text("\(trip.activities.count)")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue)
+                        .clipShape(Capsule())
                 }
                 
+                // Date range
                 if let firstActivity = trip.activities.first,
                    let lastActivity = trip.activities.last {
-                    Text("\(firstActivity.startTime.formatted(.dateTime.month().day())) - \(lastActivity.endTime.formatted(.dateTime.month().day()))")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Preview of activities
-                HStack(spacing: 4) {
-                    ForEach(trip.activities.prefix(3)) { activity in
-                        Circle()
-                            .fill(activity.category.color)
-                            .frame(width: 8, height: 8)
-                    }
-                    
-                    if trip.activities.count > 3 {
-                        Text("+\(trip.activities.count - 3)")
-                            .font(.caption2)
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        
+                        Text("\(firstActivity.startTime.formatted(.dateTime.month().day())) - \(lastActivity.endTime.formatted(.dateTime.month().day()))")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 }
+                
+                // Activity preview
+                HStack {
+                    ForEach(trip.activities.prefix(5)) { activity in
+                        Circle()
+                            .fill(activity.category.color)
+                            .frame(width: 12, height: 12)
+                    }
+                    
+                    if trip.activities.count > 5 {
+                        Text("+\(trip.activities.count - 5)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                }
+                
+                // Location preview
+                if let firstLocation = trip.activities.first?.locationName {
+                    HStack {
+                        Image(systemName: "location")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        
+                        Text(extractCityFromLocation(firstLocation))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
-            .padding(.vertical, 4)
+            .padding()
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -1087,6 +1249,7 @@ struct ImportFeature {
 
 struct ImportView: View {
     @Bindable var store: StoreOf<ImportFeature>
+    let onDismiss: () -> Void
     
     var body: some View {
         NavigationView {
@@ -1154,6 +1317,13 @@ struct ImportView: View {
             .padding()
             .navigationTitle("Import")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onDismiss()
+                    }
+                }
+            }
         }
         .fileImporter(
             isPresented: $store.showingFilePicker.sending(\.filePickerPresented),
@@ -1196,7 +1366,7 @@ struct ImportView: View {
                         .foregroundColor(.secondary)
                     
                     Button("View Trip") {
-                        // Navigate to trip view
+                        onDismiss()
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -1229,33 +1399,6 @@ struct ImportView: View {
     }
 }
 
-// MARK: - Empty Trip View
-
-struct EmptyTripView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "map")
-                .font(.system(size: 64))
-                .foregroundColor(.secondary)
-            
-            Text("No Trip Selected")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Create a new trip or import one from Claude Desktop")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            
-            Button("Load Sample Trip") {
-                // Load sample for testing
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding()
-    }
-}
-
 // MARK: - Data Models
 
 struct TravelTrip: Identifiable, Equatable {
@@ -1273,7 +1416,7 @@ struct TravelTrip: Identifiable, Equatable {
                 startTime: Calendar.current.date(byAdding: .hour, value: 10, to: Calendar.current.startOfDay(for: Date()))!,
                 endTime: Calendar.current.date(byAdding: .hour, value: 13, to: Calendar.current.startOfDay(for: Date()))!,
                 coordinate: CLLocationCoordinate2D(latitude: 48.8606, longitude: 2.3376),
-                locationName: "Musée du Louvre",
+                locationName: "Musée du Louvre, Paris",
                 category: .museum,
                 duration: 10800 // 3 hours
             ),
@@ -1283,7 +1426,7 @@ struct TravelTrip: Identifiable, Equatable {
                 startTime: Calendar.current.date(byAdding: .hour, value: 14, to: Calendar.current.startOfDay(for: Date()))!,
                 endTime: Calendar.current.date(byAdding: .hour, value: 15, to: Calendar.current.startOfDay(for: Date()))!,
                 coordinate: CLLocationCoordinate2D(latitude: 48.8542, longitude: 2.3325),
-                locationName: "Café de Flore",
+                locationName: "Café de Flore, Paris",
                 category: .restaurant,
                 duration: 3600 // 1 hour
             ),
@@ -1293,9 +1436,51 @@ struct TravelTrip: Identifiable, Equatable {
                 startTime: Calendar.current.date(byAdding: .hour, value: 16, to: Calendar.current.startOfDay(for: Date()))!,
                 endTime: Calendar.current.date(byAdding: .hour, value: 18, to: Calendar.current.startOfDay(for: Date()))!,
                 coordinate: CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.2945),
-                locationName: "Tour Eiffel",
+                locationName: "Tour Eiffel, Paris",
                 category: .landmark,
                 duration: 7200 // 2 hours
+            )
+        ]
+    )
+    
+    static let sampleTokyo = TravelTrip(
+        name: "Tokyo Adventure",
+        activities: [
+            TravelActivity(
+                id: UUID().uuidString,
+                name: "Senso-ji Temple",
+                startTime: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!,
+                endTime: Calendar.current.date(byAdding: .hour, value: 2, to: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!)!,
+                coordinate: CLLocationCoordinate2D(latitude: 35.7148, longitude: 139.7967),
+                locationName: "Senso-ji Temple, Tokyo",
+                category: .landmark,
+                duration: 7200
+            ),
+            TravelActivity(
+                id: UUID().uuidString,
+                name: "Sushi at Tsukiji",
+                startTime: Calendar.current.date(byAdding: .hour, value: 3, to: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!)!,
+                endTime: Calendar.current.date(byAdding: .hour, value: 4, to: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!)!,
+                coordinate: CLLocationCoordinate2D(latitude: 35.6654, longitude: 139.7707),
+                locationName: "Tsukiji Fish Market, Tokyo",
+                category: .restaurant,
+                duration: 3600
+            )
+        ]
+    )
+    
+    static let sampleNapa = TravelTrip(
+        name: "Napa Valley Romance",
+        activities: [
+            TravelActivity(
+                id: UUID().uuidString,
+                name: "Wine Tasting at Castello di Amorosa",
+                startTime: Calendar.current.date(byAdding: .day, value: 2, to: Calendar.current.startOfDay(for: Date()))!,
+                endTime: Calendar.current.date(byAdding: .hour, value: 2, to: Calendar.current.date(byAdding: .day, value: 2, to: Calendar.current.startOfDay(for: Date()))!)!,
+                coordinate: CLLocationCoordinate2D(latitude: 38.5816, longitude: -122.5131),
+                locationName: "Castello di Amorosa, Napa Valley",
+                category: .activity,
+                duration: 7200
             )
         ]
     )
@@ -1399,8 +1584,7 @@ struct TravelPlanningClient {
 extension TravelPlanningClient {
     static let liveValue = TravelPlanningClient(
         parseInput: { input in
-            // In a real implementation, this would call your MCP service
-            // For now, return a mock activity
+            // Phase 0: Manual parsing simulation
             return TravelActivity(
                 id: UUID().uuidString,
                 name: "Parsed Activity",
@@ -1413,11 +1597,11 @@ extension TravelPlanningClient {
             )
         },
         detectConflicts: { activities in
-            // Mock conflict detection
+            // Phase 0: Basic conflict detection
             return []
         },
         optimizeRoute: { activities in
-            // Mock route optimization - return activities as-is
+            // Phase 0: Return activities as-is
             return activities
         }
     )
@@ -1477,6 +1661,11 @@ func parseJSONTrip(_ jsonString: String) throws -> TravelTrip {
     }
     
     return TravelTrip(name: tripData.name, activities: activities)
+}
+
+func extractCityFromLocation(_ locationName: String) -> String {
+    let components = locationName.components(separatedBy: ",")
+    return components.last?.trimmingCharacters(in: .whitespaces) ?? locationName
 }
 
 // MARK: - JSON Decoding Models
