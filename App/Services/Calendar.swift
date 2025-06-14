@@ -1,472 +1,410 @@
-import AppKit
-import CoreLocation
-import EventKit
 import Foundation
+import EventKit
+import FoundationModels
 import OSLog
-import Ontology
 
 private let log = Logger.service("calendar")
 
-final class CalendarService: Service {
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
+class CalendarService: Service {
+    let name = "Calendar"
+    let description = "Access and manage calendar events"
+    var isEnabled = false
+    
     private let eventStore = EKEventStore()
-
+    
     static let shared = CalendarService()
-
-    var isActivated: Bool {
-        get async {
-            return EKEventStore.authorizationStatus(for: .event) == .fullAccess
-        }
+    
+    var tools: [any Tool] {
+        [
+            ListCalendarsTool(),
+            CreateEventTool(),
+            FetchEventsTool()
+        ]
     }
-
+    
     func activate() async throws {
-        try await eventStore.requestFullAccessToEvents()
+        let status = EKEventStore.authorizationStatus(for: .event)
+        
+        switch status {
+        case .notDetermined:
+            let granted = try await eventStore.requestFullAccessToEvents()
+            isEnabled = granted
+        case .authorized, .fullAccess:
+            isEnabled = true
+        case .denied, .restricted, .writeOnly:
+            isEnabled = false
+            throw CalendarError.accessDenied
+        @unknown default:
+            isEnabled = false
+            throw CalendarError.unknown
+        }
     }
+}
 
-    var tools: [Tool] {
-        Tool(
-            name: "calendars_list",
-            description: "List available calendars",
-            inputSchema: .object(
-                properties: [:],
-                additionalProperties: false
-            ),
-            annotations: .init(
-                title: "List Calendars",
-                readOnlyHint: true,
-                openWorldHint: false
-            )
-        ) { arguments in
-            try await self.activate()
-            
-            guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-                log.error("Calendar access not authorized")
-                throw NSError(
-                    domain: "CalendarError", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Calendar access not authorized"]
-                )
-            }
-
-            let calendars = self.eventStore.calendars(for: .event)
-
-            return calendars.map { calendar in
-                Value.object([
-                    "title": .string(calendar.title),
-                    "source": .string(calendar.source.title),
-                    "color": .string(calendar.color.accessibilityName),
-                    "isEditable": .bool(calendar.allowsContentModifications),
-                    "isSubscribed": .bool(calendar.isSubscribed),
-                ])
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
+struct ListCalendarsTool: Tool {
+    let name = "list_calendars"
+    let description = "List available calendars"
+    
+    @Generable
+    struct Arguments {
+        @Guide(description: "Optional filter for calendar type")
+        let type: String?
+        
+        @Guide(description: "Include only modifiable calendars")
+        let modifiableOnly: Bool
+        
+        init(type: String? = nil, modifiableOnly: Bool = false) {
+            self.type = type
+            self.modifiableOnly = modifiableOnly
+        }
+    }
+    
+    func call(arguments: Arguments) async throws -> ToolOutput {
+        let eventStore = EKEventStore()
+        let calendars = eventStore.calendars(for: .event)
+        
+        var filteredCalendars = calendars
+        
+        // Filter by type if specified
+        if let typeFilter = arguments.type {
+            filteredCalendars = filteredCalendars.filter { 
+                $0.type.description.lowercased() == typeFilter.lowercased() 
             }
         }
-
-        Tool(
-            name: "events_fetch",
-            description: "Get events from the calendar with flexible filtering options",
-            inputSchema: .object(
-                properties: [
-                    "start": .string(
-                        description: "Start date of the range (defaults to now)",
-                        format: .dateTime
-                    ),
-                    "end": .string(
-                        description: "End date of the range (defaults to one week from start)",
-                        format: .dateTime
-                    ),
-                    "calendars": .array(
-                        description:
-                            "Names of calendars to fetch from; if empty, fetches from all calendars",
-                        items: .string(),
-                    ),
-                    "query": .string(
-                        description: "Text to search for in event titles and locations"
-                    ),
-                    "includeAllDay": .boolean(
-                        default: true
-                    ),
-                    "status": .string(
-                        description: "Filter by event status",
-                        enum: ["none", "tentative", "confirmed", "canceled"]
-                    ),
-                    "availability": .string(
-                        description: "Filter by availability status",
-                        enum: EKEventAvailability.allCases.map { .string($0.stringValue) }
-                    ),
-                    "hasAlarms": .boolean(),
-                    "isRecurring": .boolean(),
-                ],
-                additionalProperties: false
-            ),
-            annotations: .init(
-                title: "Fetch Events",
-                readOnlyHint: true,
-                openWorldHint: false
-            )
-        ) { arguments in
-            try await self.activate()
-            
-            guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-                log.error("Calendar access not authorized")
-                throw NSError(
-                    domain: "CalendarError", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Calendar access not authorized"]
-                )
-            }
-
-            // Filter calendars based on provided names
-            var calendars = self.eventStore.calendars(for: .event)
-            if case let .array(calendarNames) = arguments["calendars"],
-                !calendarNames.isEmpty
-            {
-                let requestedNames = Set(calendarNames.compactMap { $0.stringValue?.lowercased() })
-                calendars = calendars.filter { requestedNames.contains($0.title.lowercased()) }
-            }
-
-            // Parse dates and set defaults
-            let now = Date()
-            var startDate = now
-            var endDate = Calendar.current.date(byAdding: .weekOfYear, value: 1, to: now)!
-
-            if case let .string(start) = arguments["start"],
-                let parsedStart = ISO8601DateFormatter.parseFlexibleISODate(start)
-            {
-                startDate = parsedStart
-            }
-
-            if case let .string(end) = arguments["end"],
-                let parsedEnd = ISO8601DateFormatter.parseFlexibleISODate(end)
-            {
-                endDate = parsedEnd
-            }
-
-            // Create base predicate for date range and calendars
-            let predicate = self.eventStore.predicateForEvents(
-                withStart: startDate,
-                end: endDate,
-                calendars: calendars
-            )
-
-            // Fetch events
-            var events = self.eventStore.events(matching: predicate)
-
-            // Apply additional filters
-            if case let .bool(includeAllDay) = arguments["includeAllDay"],
-                !includeAllDay
-            {
-                events = events.filter { !$0.isAllDay }
-            }
-
-            if case let .string(searchText) = arguments["query"],
-                !searchText.isEmpty
-            {
-                events = events.filter {
-                    ($0.title?.localizedCaseInsensitiveContains(searchText) == true)
-                        || ($0.location?.localizedCaseInsensitiveContains(searchText) == true)
-                }
-            }
-
-            if case let .string(status) = arguments["status"] {
-                let statusValue = EKEventStatus(status)
-                events = events.filter { $0.status == statusValue }
-            }
-
-            if case let .string(availability) = arguments["availability"] {
-                let availabilityValue = EKEventAvailability(availability)
-                events = events.filter { $0.availability == availabilityValue }
-            }
-
-            if case let .bool(hasAlarms) = arguments["hasAlarms"] {
-                events = events.filter { ($0.hasAlarms) == hasAlarms }
-            }
-
-            if case let .bool(isRecurring) = arguments["isRecurring"] {
-                events = events.filter { ($0.hasRecurrenceRules) == isRecurring }
-            }
-
-            return events.map { Event($0) }
+        
+        // Filter by modifiable if requested
+        if arguments.modifiableOnly {
+            filteredCalendars = filteredCalendars.filter { $0.allowsContentModifications }
         }
-        Tool(
-            name: "events_create",
-            description: "Create a new calendar event with specified properties",
-            inputSchema: .object(
-                properties: [
-                    "title": .string(),
-                    "start": .string(
-                        format: .dateTime
-                    ),
-                    "end": .string(
-                        format: .dateTime
-                    ),
-                    "calendar": .string(
-                        description: "Calendar to use (uses default if not specified)"
-                    ),
-                    "location": .string(),
-                    "notes": .string(),
-                    "url": .string(
-                        format: .uri
-                    ),
-                    "isAllDay": .boolean(
-                        default: false
-                    ),
-                    "availability": .string(
-                        description: "Availability status",
-                        default: .string(EKEventAvailability.busy.stringValue),
-                        enum: EKEventAvailability.allCases.map { .string($0.stringValue) }
-                    ),
-                    "alarms": .array(
-                        description: "Alarm configurations for the event",
-                        items: .anyOf(
-                            [
-                                // Relative alarm (minutes before event)
-                                .object(
-                                    properties: [
-                                        "type": .string(
-                                            const: "relative",
-                                        ),
-                                        "minutes": .integer(
-                                            description:
-                                                "Minutes offset from event start (negative for before, positive for after)"
-                                        ),
-                                        "sound": .string(
-                                            description: "Sound name to play when alarm triggers",
-                                            enum: Sound.allCases.map { .string($0.rawValue) }
-                                        ),
-                                        "emailAddress": .string(
-                                            description: "Email address to send notification to"
-                                        ),
-                                    ],
-                                    required: ["minutes"],
-                                    additionalProperties: false
-                                ),
-                                // Absolute alarm (specific date/time)
-                                .object(
-                                    properties: [
-                                        "type": .string(
-                                            const: "absolute",
-                                        ),
-                                        "datetime": .string(
-                                            format: .dateTime
-                                        ),
-                                        "sound": .string(
-                                            description: "Sound name to play when alarm triggers",
-                                            enum: Sound.allCases.map { .string($0.rawValue) }
-                                        ),
-                                        "emailAddress": .string(
-                                            description: "Email address to send notification to"
-                                        ),
-                                    ],
-                                    required: ["datetime"],
-                                    additionalProperties: false
-                                ),
-                                // Proximity alarm (location-based)
-                                .object(
-                                    properties: [
-                                        "type": .string(
-                                            const: "proximity",
-                                        ),
-                                        "proximity": .string(
-                                            description: "Proximity trigger type",
-                                            default: "enter",
-                                            enum: ["enter", "leave"]
-                                        ),
-                                        "locationTitle": .string(),
-                                        "latitude": .number(),
-                                        "longitude": .number(),
-                                        "radius": .number(
-                                            description: "Radius in meters",
-                                            default: .int(200)
-                                        ),
-                                        "sound": .string(
-                                            description: "Sound name to play when alarm triggers",
-                                            enum: Sound.allCases.map { .string($0.rawValue) }
-                                        ),
-                                        "emailAddress": .string(
-                                            description: "Email address to send notification to"
-                                        ),
-                                    ],
-                                    required: ["locationTitle", "latitude", "longitude"],
-                                    additionalProperties: false
-                                ),
-                            ]
-                        )
-                    ),
-                    "hasAlarms": .boolean(),
-                    "isRecurring": .boolean(),
-                ],
-                required: ["title", "start", "end"],
-                additionalProperties: false
-            ),
-            annotations: .init(
-                title: "Create Event",
-                destructiveHint: true,
-                openWorldHint: false
+        
+        let calendarInfos = filteredCalendars.map { calendar in
+            CalendarInfo(
+                identifier: calendar.calendarIdentifier,
+                title: calendar.title,
+                type: calendar.type.description,
+                allowsContentModifications: calendar.allowsContentModifications
             )
-        ) { arguments in
-            try await self.activate()
+        }
+        
+        let jsonData = try JSONEncoder().encode(calendarInfos)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+        
+        return ToolOutput(jsonString)
+    }
+}
 
-            guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-                log.error("Calendar access not authorized")
-                throw NSError(
-                    domain: "CalendarError", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Calendar access not authorized"]
-                )
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
+private struct CreateEventTool: Tool {
+    let name = "create_event"
+    let description = "Create a new calendar event with specified properties"
+    
+    @Generable
+    struct Arguments {
+        @Guide(description: "Event title")
+        let title: String
+        
+        @Guide(description: "Start date and time")
+        let start: Date
+        
+        @Guide(description: "End date and time")
+        let end: Date
+        
+        @Guide(description: "Calendar name to create event in")
+        let calendar: String?
+        
+        @Guide(description: "Event location")
+        let location: String?
+        
+        @Guide(description: "Event notes or description")
+        let notes: String?
+        
+        @Guide(description: "Event URL")
+        let url: String?
+        
+        @Guide(description: "Whether this is an all-day event")
+        let isAllDay: Bool?
+        
+        @Guide(description: "Alarm offsets in minutes before event")
+        let alarms: [Int]?
+        
+        @Guide(description: "Event availability status")
+        let availability: String?
+        
+        @Guide(description: "Whether event should have alarms")
+        let hasAlarms: Bool?
+        
+        @Guide(description: "Whether event is recurring")
+        let isRecurring: Bool?
+    }
+    
+    func call(arguments: Arguments) async throws -> ToolOutput {
+        let eventStore = EKEventStore()
+        let event = EKEvent(eventStore: eventStore)
+        
+        event.title = arguments.title
+        event.startDate = arguments.start
+        event.endDate = arguments.end
+        event.isAllDay = arguments.isAllDay ?? false
+        
+        if let location = arguments.location {
+            event.location = location
+        }
+        
+        if let notes = arguments.notes {
+            event.notes = notes
+        }
+        
+        if let urlString = arguments.url, let url = URL(string: urlString) {
+            event.url = url
+        }
+        
+        // Set calendar
+        if let calendarName = arguments.calendar {
+            let calendars = eventStore.calendars(for: .event)
+            event.calendar = calendars.first { $0.title == calendarName } ?? eventStore.defaultCalendarForNewEvents
+        } else {
+            event.calendar = eventStore.defaultCalendarForNewEvents
+        }
+        
+        // Add alarms
+        if let alarmMinutes = arguments.alarms, arguments.hasAlarms == true {
+            event.alarms = alarmMinutes.map { EKAlarm(relativeOffset: TimeInterval(-$0 * 60)) }
+        }
+        
+        // Set availability
+        if let availabilityString = arguments.availability {
+            switch availabilityString.lowercased() {
+            case "busy":
+                event.availability = .busy
+            case "free":
+                event.availability = .free
+            case "tentative":
+                event.availability = .tentative
+            case "unavailable":
+                event.availability = .unavailable
+            default:
+                event.availability = .busy
             }
+        }
+        
+        try eventStore.save(event, span: .thisEvent)
+        
+        log.info("Created calendar event: \(event.title ?? "Untitled")")
+        
+        let result = EventResult(
+            identifier: event.eventIdentifier,
+            title: event.title ?? "",
+            startDate: event.startDate,
+            endDate: event.endDate,
+            calendar: event.calendar?.title ?? "",
+            created: true
+        )
+        
+        let jsonData = try JSONEncoder().encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+        
+        return ToolOutput(jsonString)
+    }
+}
 
-            // Create new event
-            let event = EKEvent(eventStore: self.eventStore)
-
-            // Set required properties
-            guard case let .string(title) = arguments["title"] else {
-                throw NSError(
-                    domain: "CalendarError", code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "Event title is required"]
-                )
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
+private struct FetchEventsTool: Tool {
+    let name = "fetch_events"
+    let description = "Get events from the calendar with flexible filtering options"
+    
+    @Generable
+    struct Arguments {
+        @Guide(description: "Start date for event search")
+        let start: Date?
+        
+        @Guide(description: "End date for event search") 
+        let end: Date?
+        
+        @Guide(description: "Calendar names to search in")
+        let calendars: [String]?
+        
+        @Guide(description: "Search query for event titles/locations")
+        let query: String?
+        
+        @Guide(description: "Include all-day events")
+        let includeAllDay: Bool?
+        
+        @Guide(description: "Filter by availability status")
+        let availability: String?
+        
+        @Guide(description: "Filter by event status")
+        let status: String?
+        
+        @Guide(description: "Filter by whether events have alarms")
+        let hasAlarms: Bool?
+        
+        @Guide(description: "Filter by whether events are recurring")
+        let isRecurring: Bool?
+    }
+    
+    func call(arguments: Arguments) async throws -> ToolOutput {
+        let eventStore = EKEventStore()
+        
+        let startDate = arguments.start ?? Date()
+        let endDate = arguments.end ?? Calendar.current.date(byAdding: .weekOfYear, value: 1, to: startDate) ?? Date()
+        
+        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
+        let events = eventStore.events(matching: predicate)
+        
+        var filteredEvents = events
+        
+        // Filter by calendars
+        if let calendarNames = arguments.calendars, !calendarNames.isEmpty {
+            filteredEvents = filteredEvents.filter { event in
+                calendarNames.contains(event.calendar.title)
             }
-            event.title = title
-
-            // Parse dates
-            guard case let .string(startDateStr) = arguments["start"],
-                let startDate = ISO8601DateFormatter.parseFlexibleISODate(startDateStr),
-                case let .string(endDateStr) = arguments["end"],
-                let endDate = ISO8601DateFormatter.parseFlexibleISODate(endDateStr)
-            else {
-                throw NSError(
-                    domain: "CalendarError", code: 2,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Invalid start or end date format. Expected ISO 8601 format."
-                    ]
-                )
+        }
+        
+        // Filter by query
+        if let query = arguments.query {
+            filteredEvents = filteredEvents.filter { event in
+                event.title?.localizedCaseInsensitiveContains(query) == true ||
+                event.location?.localizedCaseInsensitiveContains(query) == true
             }
-
-            // For all-day events, ensure we use local midnight
-            if case .bool(true) = arguments["isAllDay"] {
-                let calendar = Calendar.current
-                var startComponents = calendar.dateComponents(
-                    [.year, .month, .day], from: startDate)
-                startComponents.hour = 0
-                startComponents.minute = 0
-                startComponents.second = 0
-
-                var endComponents = calendar.dateComponents([.year, .month, .day], from: endDate)
-                endComponents.hour = 23
-                endComponents.minute = 59
-                endComponents.second = 59
-
-                event.startDate = calendar.date(from: startComponents)!
-                event.endDate = calendar.date(from: endComponents)!
-                event.isAllDay = true
-            } else {
-                event.startDate = startDate
-                event.endDate = endDate
+        }
+        
+        // Filter by all-day
+        if let includeAllDay = arguments.includeAllDay, !includeAllDay {
+            filteredEvents = filteredEvents.filter { !$0.isAllDay }
+        }
+        
+        // Filter by availability
+        if let availabilityString = arguments.availability {
+            let targetAvailability: EKEventAvailability
+            switch availabilityString.lowercased() {
+            case "busy": targetAvailability = .busy
+            case "free": targetAvailability = .free
+            case "tentative": targetAvailability = .tentative
+            case "unavailable": targetAvailability = .unavailable
+            default: targetAvailability = .busy
             }
-
-            // Set calendar
-            var calendar = self.eventStore.defaultCalendarForNewEvents
-            if case let .string(calendarName) = arguments["calendar"] {
-                if let matchingCalendar = self.eventStore.calendars(for: .event)
-                    .first(where: { $0.title.lowercased() == calendarName.lowercased() })
-                {
-                    calendar = matchingCalendar
-                }
+            
+            filteredEvents = filteredEvents.filter { $0.availability == targetAvailability }
+        }
+        
+        // Filter by alarms
+        if let hasAlarms = arguments.hasAlarms {
+            filteredEvents = filteredEvents.filter { event in
+                let eventHasAlarms = event.alarms?.isEmpty == false
+                return eventHasAlarms == hasAlarms
             }
-            event.calendar = calendar
-
-            // Set optional properties
-            if case let .string(location) = arguments["location"] {
-                event.location = location
+        }
+        
+        // Filter by recurring
+        if let isRecurring = arguments.isRecurring {
+            filteredEvents = filteredEvents.filter { event in
+                let eventIsRecurring = event.hasRecurrenceRules
+                return eventIsRecurring == isRecurring
             }
+        }
+        
+        let eventInfos = filteredEvents.map { event in
+            EventInfo(
+                identifier: event.eventIdentifier,
+                title: event.title ?? "",
+                startDate: event.startDate,
+                endDate: event.endDate,
+                isAllDay: event.isAllDay,
+                location: event.location,
+                notes: event.notes,
+                url: event.url?.absoluteString,
+                calendar: event.calendar.title,
+                availability: event.availability.description,
+                hasAlarms: event.alarms?.isEmpty == false,
+                isRecurring: event.hasRecurrenceRules,
+                status: event.status.description
+            )
+        }
+        
+        let jsonData = try JSONEncoder().encode(eventInfos)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+        
+        return ToolOutput(jsonString)
+    }
+}
 
-            if case let .string(notes) = arguments["notes"] {
-                event.notes = notes
-            }
+// MARK: - Supporting Types
 
-            if case let .string(urlString) = arguments["url"],
-                let url = URL(string: urlString)
-            {
-                event.url = url
-            }
+struct CalendarInfo: Codable {
+    let identifier: String
+    let title: String
+    let type: String
+    let allowsContentModifications: Bool
+}
 
-            if case let .string(availability) = arguments["availability"] {
-                event.availability = EKEventAvailability(availability)
-            }
+struct EventResult: Codable {
+    let identifier: String
+    let title: String
+    let startDate: Date
+    let endDate: Date
+    let calendar: String
+    let created: Bool
+}
 
-            // Set alarms
-            if case let .array(alarmConfigs) = arguments["alarms"] {
-                var alarms: [EKAlarm] = []
+struct EventInfo: Codable {
+    let identifier: String
+    let title: String
+    let startDate: Date
+    let endDate: Date
+    let isAllDay: Bool
+    let location: String?
+    let notes: String?
+    let url: String?
+    let calendar: String
+    let availability: String
+    let hasAlarms: Bool
+    let isRecurring: Bool
+    let status: String
+}
 
-                for alarmConfig in alarmConfigs {
-                    guard case let .object(config) = alarmConfig else { continue }
+enum CalendarError: Error {
+    case accessDenied
+    case unknown
+}
 
-                    var alarm: EKAlarm?
+// MARK: - Extensions
 
-                    let alarmType = config["type"]?.stringValue ?? "relative"
-                    switch alarmType {
-                    case "relative":
-                        if case let .int(minutes) = config["minutes"] {
-                            alarm = EKAlarm(relativeOffset: TimeInterval(-minutes * 60))
-                        }
+extension EKCalendarType {
+    var description: String {
+        switch self {
+        case .local: return "local"
+        case .calDAV: return "caldav"
+        case .exchange: return "exchange"
+        case .subscription: return "subscription"
+        case .birthday: return "birthday"
+        @unknown default: return "unknown"
+        }
+    }
+}
 
-                    case "absolute":
-                        if case let .string(datetimeStr) = config["datetime"],
-                            let absoluteDate = ISO8601DateFormatter.parseFlexibleISODate(
-                                datetimeStr)
-                        {
-                            alarm = EKAlarm(absoluteDate: absoluteDate)
-                        }
+extension EKEventAvailability {
+    var description: String {
+        switch self {
+        case .notSupported: return "none"
+        case .busy: return "busy"
+        case .free: return "free"
+        case .tentative: return "tentative"
+        case .unavailable: return "unavailable"
+        @unknown default: return "unknown"
+        }
+    }
+}
 
-                    case "proximity":
-                        if case let .string(locationTitle) = config["locationTitle"],
-                            case let .double(latitude) = config["latitude"],
-                            case let .double(longitude) = config["longitude"]
-                        {
-                            alarm = EKAlarm()
-
-                            // Create structured location
-                            let structuredLocation = EKStructuredLocation(title: locationTitle)
-                            structuredLocation.geoLocation = CLLocation(
-                                latitude: latitude, longitude: longitude)
-
-                            if case let .double(radius) = config["radius"] {
-                                structuredLocation.radius = radius
-                            } else if case let .int(radiusInt) = config["radius"] {
-                                structuredLocation.radius = Double(radiusInt)
-                            }
-
-                            // Set proximity type
-                            let proximityType = config["proximity"]?.stringValue ?? "enter"
-                            let proximity: EKAlarmProximity =
-                                proximityType == "enter" ? .enter : .leave
-                            alarm?.proximity = proximity
-                            alarm?.structuredLocation = structuredLocation
-                        }
-
-                    default:
-                        log.error("Unexpected alarm type encountered: \(alarmType, privacy: .public)")
-                        continue
-                    }
-
-                    guard let alarm = alarm else { continue }
-
-                    if case let .string(soundName) = config["sound"],
-                        Sound(rawValue: soundName) != nil
-                    {
-                        alarm.soundName = soundName
-                    }
-
-                    if case let .string(email) = config["emailAddress"], !email.isEmpty {
-                        alarm.emailAddress = email
-                    }
-
-                    alarms.append(alarm)
-                }
-
-                event.alarms = alarms
-            }
-
-            // Save the event
-            try self.eventStore.save(event, span: .thisEvent)
-
-            return Event(event)
+extension EKEventStatus {
+    var description: String {
+        switch self {
+        case .none: return "none"
+        case .confirmed: return "confirmed"
+        case .tentative: return "tentative"
+        case .canceled: return "canceled"
+        @unknown default: return "unknown"
         }
     }
 }

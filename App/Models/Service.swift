@@ -1,32 +1,27 @@
-@preconcurrency
-protocol Service {
-    @ToolBuilder var tools: [Tool] { get }
+import Foundation
+import FoundationModels
 
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
+protocol Service {
+    var name: String { get }
+    var description: String { get }
+    var isEnabled: Bool { get set }
+    
+    var tools: [any FoundationModels.Tool] { get }
+    
     var isActivated: Bool { get async }
     func activate() async throws
 }
 
+@available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
 extension Service {
     var isActivated: Bool {
         get async {
-            return true
+            return isEnabled
         }
     }
 
-    func activate() async throws {}
-
-    func call(tool name: String, with arguments: [String: Value]) async throws -> Value? {
-        for tool in tools where tool.name == name {
-            return try await tool.callAsFunction(arguments)
-        }
-
-        return nil
-    }
-}
-
-@resultBuilder
-struct ToolBuilder {
-    static func buildBlock(_ tools: Tool...) -> [Tool] {
-        tools
+    func activate() async throws {
+        // Default implementation - services can override if needed
     }
 }
