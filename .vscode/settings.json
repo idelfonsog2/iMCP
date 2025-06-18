@@ -1,0 +1,6 @@
+// .vscode/settings.json
+{
+    "swift.path": "/usr/bin/swift",
+    "swift.sourcekit-lsp.serverPath": "/Users/idelfonso/.swiftly/bin/sourcekit-lsp",
+    "swift.buildPath": ".build",
+}

@@ -4,24 +4,19 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build CLI",
+            "label": "Build iOS Simulator",
             "type": "shell",
-            "command": "swift",
-            "args": ["build"],
-            "options": {
-                "cwd": "${workspaceFolder}/CLI"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": []
+            "command": "xcodebuild",
+            "args": [
+                "-scheme",
+                "DeetsApp",
+                "-destination",
+                "platform=iOS Simulator,name=iPhone 16 26.0",
+                "build"
+            ],
+            "problemMatcher": [
+                "$swiftc"
+            ]
         }
     ]
 }

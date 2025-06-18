@@ -102,7 +102,7 @@ private struct ContactsMeTool: Tool {
 
 @available(macOS 26.0, iOS 18.0, watchOS 11.0, tvOS 18.0, *)
 private struct ContactsSearchTool: Tool {
-    let name = "contacts_search" 
+    let name = "contacts_search"
     let description = "Search contacts by name, phone number, and/or email"
     
     @Generable
@@ -425,7 +425,7 @@ struct ContactPhoneNumbers: Codable {
     @Guide(description: "Mobile phone number")
     let mobile: String?
     
-    @Guide(description: "Work phone number") 
+    @Guide(description: "Work phone number")
     let work: String?
     
     @Guide(description: "Home phone number")
